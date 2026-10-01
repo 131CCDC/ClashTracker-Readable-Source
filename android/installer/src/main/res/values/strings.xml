@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Clashaiaa Probe Installer</string>
+    <string name="subtitle">Installs the native probe into a rooted Null\'s Royale installation. Aborts on any fingerprint mismatch and never touches the APK signature.</string>
+    <string name="preflight">Preflight</string>
+    <string name="install">Install</string>
+    <string name="restore">Restore</string>
+    <string name="receipt">Receipt</string>
+    <string name="intro">Run Preflight first. It only reads: it proves su works, finds the installed game, and verifies the build fingerprint. Nothing is written until you press Install.</string>
+</resources>

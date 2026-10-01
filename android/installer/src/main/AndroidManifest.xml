@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 11+ hides other installed apps unless they are declared here. -->
+    <queries>
+        <package android:name="nullsroyale.rel.free" />
+        <package android:name="me.weishu.kernelsu" />
+    </queries>
+
+    <!--
+      Deliberately permission-free: every privileged step runs through `su`, so the
+      installer never needs INTERNET, storage or overlay access of its own.
+    -->
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

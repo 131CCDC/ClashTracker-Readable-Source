@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<dev.clashaiaa.overlay.ScalablePanelLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scalablePanel"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+
+    <FrameLayout
+        android:id="@+id/panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/overlay_bg"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="20dp"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="拖动悬浮窗"
+                    android:text="⠿"
+                    android:textColor="#CC80D8FF"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingEnd="6dp"
+                    android:text="@string/status_disconnected"
+                    android:textColor="#FF80D8FF"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/alphaButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:text="@string/alpha_button"
+                    android:textColor="#FFB0BEC5"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/closeButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="2dp"
+                    android:text="@string/close_button"
+                    android:textColor="#FFFF8A80"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <dev.clashaiaa.overlay.TrackerHudView
+                android:id="@+id/trackerHud"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/resizeHandle"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="end|bottom"
+            android:contentDescription="拖动缩放悬浮窗"
+            android:gravity="end|bottom"
+            android:text="↘"
+            android:textColor="#CC80D8FF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </FrameLayout>
+</dev.clashaiaa.overlay.ScalablePanelLayout>

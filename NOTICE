@@ -1,0 +1,31 @@
+ClashTracker / ClashTracker Root Installer — curated source snapshot
+
+This repository is a curated, readable source snapshot of the ClashTracker
+Android overlay (:app) and the ClashTracker Root Installer (:installer),
+together with the source-only probe used to build the installer's native
+payload.
+
+It is NOT decompiled APK output and does NOT claim to be the complete or
+original upstream source of any product. It is provided as-is, without any
+warranty, and is NOT guaranteed to build without locally supplied assets and
+native artifacts.
+
+Nothing redistributed here is claimed to be original game, SDK or third-party
+proprietary material:
+
+- No APK is redistributed.
+- No original game/SDK library (including libg.so or libscid_sdk.so) and no
+  game card resource is redistributed. The probe is built locally by the user
+  from the sources in probe/; the SDK the game loads is preserved from the
+  user's own installation on the user's own device.
+- No captured replay, account, device or other user data is redistributed;
+  identifying values that remained in the retained text were replaced with
+  conspicuous synthetic examples.
+- No model weights or training replay are redistributed.
+
+The FirstLight CR material adapted under Apache-2.0 is documented in
+probe/FIRSTLIGHT_LICENSE, probe/FIRSTLIGHT_NOTICE.md and probe/UPSTREAM_NOTICE.
+See LICENSE for the Apache-2.0 text.
+
+Product names identify compatibility only. This project is not affiliated with,
+endorsed by, or representative of Supercell, Null's or MuMu.

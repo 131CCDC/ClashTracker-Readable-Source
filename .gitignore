@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# ClashTracker / ClashTracker Root Installer — curated source snapshot
+# Android / Gradle / NDK, plus local-only and private material that must never
+# be published from this working tree.
+# ---------------------------------------------------------------------------
+
+# Android / Gradle / NDK build output
+build/
+**/build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Compiled binaries and packaged apps (must be built locally, not committed)
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.so
+*.dll
+*.exe
+*.bin
+*.o
+*.obj
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+*.keystore
+*.jks
+
+# Python / probe caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Local-only import and private data
+tablet-import/
+*.log
+logs/
+*.codex-ds-task.txt
+
+# Captured game/user data and assets with unclear redistribution status
+assets/cards/*.png
+assets/cards/faces/
+probe/artifacts/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp

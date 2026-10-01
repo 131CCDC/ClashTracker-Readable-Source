@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="help_text">平板本机版 ClashTracker：通过 127.0.0.1 读取只读探针，显示敌方圣水、卡图、手牌循环与 Ghost Drop。运行时不需要电脑或 ADB；需先用 Root 安装器装入匹配版本的探针。</string>
+    <string name="endpoint_format">Probe endpoint: %1$s:%2$d</string>
+    <string name="waiting_for_battle">等待对局</string>
+    <string name="overlay_running">悬浮窗正在运行，请切回游戏</string>
+    <string name="preview_elixir_format">敌方圣水：%1$s</string>
+    <string name="preview_hand_format">敌方手牌：%1$s</string>
+    <string name="my_seat">我的席位（识别出本机账号前的临时回退）</string>
+    <string name="seat_owner0">我是 owner 0</string>
+    <string name="seat_owner1">我是 owner 1</string>
+    <string name="my_account_id">我的原生 account id（推荐，优先于席位）</string>
+    <string name="account_id_hint">留空会在本机第一次下牌后自动识别；填写后开局第一帧即锁定</string>
+    <string name="candidate_hint">本局两位玩家的 account id（点一下即锁定本机）：当前 %1$s</string>
+    <string name="candidate_hint_empty">本局两位玩家的 account id：进入对局后可一键锁定本机</string>
+    <string name="candidate_empty">候选 --</string>
+    <string name="candidate_format">%1$d（owner %2$d）</string>
+    <string name="candidate_pinned">已锁定本机账号 %1$d</string>
+    <string name="ghost_enabled">启用 Ghost Drop 落点预览（全屏触摸穿透）</string>
+    <string name="ghost_card_opacity">Ghost Drop 牌面不透明度</string>
+    <string name="ghost_tile_opacity">Ghost Drop 落点框不透明度</string>
+    <string name="ghost_opacity_format">当前 %1$d%% · 拖动即时生效（0 最透明，100 最实）</string>
+    <string name="save_settings">保存设置</string>
+    <string name="grant_overlay">授予悬浮窗权限</string>
+    <string name="start_overlay">启动 ClashTracker</string>
+    <string name="stop_overlay">停止 ClashTracker</string>
+    <string name="test_probe">测试探针（PING）</string>
+    <string name="ping_ok">PING: PONG (probe reachable)</string>
+    <string name="ping_failed">PING failed (probe not running?)</string>
+    <string name="overlay_permission_required">Overlay permission is required before the panel can be shown.</string>
+    <string name="settings_saved">Settings saved</string>
+</resources>

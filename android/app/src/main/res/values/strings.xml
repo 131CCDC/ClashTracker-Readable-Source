@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ClashTracker</string>
+    <string name="status_disconnected">Probe: Disconnected</string>
+    <string name="alpha_button">A</string>
+    <string name="close_button">X</string>
+    <string name="elixir_placeholder">Enemy Elixir: --</string>
+    <string name="elixir_format">Enemy Elixir: %1$s</string>
+    <string name="hand_title">Opponent hand</string>
+    <string name="card_placeholder">--</string>
+    <string name="notification_channel">Overlay status</string>
+    <string name="notification_title">Clashaiaa overlay running</string>
+    <string name="notification_text">Tap to open controls</string>
+    <string name="history_title">对战记录</string>
+    <string name="history_open">对战记录 / Battle History</string>
+    <string name="history_record_start">开始记录对战</string>
+    <string name="history_record_stop">停止记录对战</string>
+</resources>
