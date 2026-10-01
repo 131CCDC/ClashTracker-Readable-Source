@@ -6,12 +6,11 @@ package dev.clashaiaa.overlay.history
  * The state machine is deliberately small and total:
  *
  * ```
- * BattleStart -> BattleRunning -> BattleEnd -> WaitForAuthoritativeHistory
+ * BattleStart -> BattleRunning -> NativeFinalized -> BattleEnd
  * ```
  *
- * These records are telemetry, never final history. Nothing here touches the
- * database: the service keeps the latest session in memory until a game-owned
- * Battle Log payload can finalize it.
+ * Nothing here touches the database. The service persists the crash-safe start
+ * row and the one-shot native finalization on its history executor.
  *
  * Everything the probe cannot attest stays `null`. In particular the live
  * stream carries no game mode, no arena and no player names, so those columns
@@ -26,7 +25,10 @@ class BattleRecorder(
         /** First frame of a battle: create/replace the in-memory working session. */
         data class Started(val record: BattleRecord) : Event()
 
-        /** Capture ended: retain as a diagnostic/reconciliation candidate only. */
+        /** Validated game-owned native result; emitted exactly once per battle. */
+        data class Finalized(val record: BattleRecord) : Event()
+
+        /** Capture ended: diagnostic only; it never finalizes a database row. */
         data class Finished(val record: BattleRecord) : Event()
     }
 
@@ -38,9 +40,11 @@ class BattleRecorder(
     )
 
     private class Live(
+        val uid: String,
         val startWallMs: Long,
-        val myOwner: Int,
-        val identitySource: String,
+        var myOwner: Int,
+        var identitySource: String,
+        var identityVerified: Boolean,
         val accounts: MutableMap<Int, Long>,
         val slots: MutableMap<Int, MutableMap<Int, Slot>>,
         var firstTick: Int,
@@ -51,19 +55,19 @@ class BattleRecorder(
         var towers: List<FrameTower>,
         var lastFrameWallMs: Long,
         var lastRaw: String?,
-    ) {
-        val uid: String
-            get() {
-                val me = accounts[myOwner] ?: 0L
-                val enemy = accounts[1 - myOwner] ?: 0L
-                return "live:${startWallMs / 1000}:$me:$enemy"
-            }
-    }
+        var winnerOwner: Int? = null,
+        var nativeResultRaw: Int? = null,
+        var nativeResultValidated: Boolean = false,
+        var finalizedEmitted: Boolean = false,
+    )
 
     private var live: Live? = null
 
     /** The battle currently being recorded, if any. */
     val active: Boolean get() = live != null
+
+    /** Stable uid of the active battle, used to attach semantic event rows. */
+    val activeBattleUid: String? get() = live?.uid
 
     /**
      * Feed one probe frame.
@@ -73,7 +77,12 @@ class BattleRecorder(
      * @param identitySource how that seat was decided; stored so a guessed seat
      *   can never be read back as proof.
      */
-    fun onFrame(frame: BattleFrame, localOwner: Int, identitySource: String): List<Event> {
+    fun onFrame(
+        frame: BattleFrame,
+        localOwner: Int,
+        identitySource: String,
+        identityVerified: Boolean = verifiedIdentitySource(identitySource),
+    ): List<Event> {
         val now = clock()
         val events = ArrayList<Event>(2)
 
@@ -84,7 +93,9 @@ class BattleRecorder(
 
         val current = live
         if (current == null) {
-            events += start(frame, localOwner, identitySource, now)
+            val started = start(frame, localOwner, identitySource, identityVerified, now)
+            events += Event.Started(toRecord(started, Kind.STARTED))
+            maybeFinalize(started, frame)?.let(events::add)
             return events
         }
 
@@ -93,11 +104,14 @@ class BattleRecorder(
             accountsChanged(current, frame)
         if (restarted) {
             finish(events)
-            events += start(frame, localOwner, identitySource, now)
+            val started = start(frame, localOwner, identitySource, identityVerified, now)
+            events += Event.Started(toRecord(started, Kind.STARTED))
+            maybeFinalize(started, frame)?.let(events::add)
             return events
         }
 
-        update(current, frame, now)
+        update(current, frame, localOwner, identitySource, identityVerified, now)
+        maybeFinalize(current, frame)?.let(events::add)
         return events
     }
 
@@ -117,7 +131,13 @@ class BattleRecorder(
         live = null
     }
 
-    private fun start(frame: BattleFrame, localOwner: Int, identitySource: String, now: Long): Event {
+    private fun start(
+        frame: BattleFrame,
+        localOwner: Int,
+        identitySource: String,
+        identityVerified: Boolean,
+        now: Long,
+    ): Live {
         val owner = if (localOwner in 0..1 && frame.player(localOwner) != null) {
             localOwner
         } else {
@@ -138,33 +158,47 @@ class BattleRecorder(
             }
             slots[player.owner] = forPlayer
         }
+        val startWallMs = now - frame.tick * TICK_MS
         val session = Live(
-            startWallMs = now - frame.tick * TICK_MS,
+            uid = "live:${startWallMs / 1000}:${accounts[owner] ?: 0L}:${accounts[1 - owner] ?: 0L}",
+            startWallMs = startWallMs,
             myOwner = owner,
             identitySource = identitySource,
+            identityVerified = identityVerified && localOwner in 0..1,
             accounts = accounts,
             slots = slots,
             firstTick = frame.tick,
             lastTick = frame.tick,
             myCrowns = crownsFor(frame, owner),
             enemyCrowns = crownsFor(frame, 1 - owner),
-            decidedTick = if (frame.finalized) frame.tick else null,
+            decidedTick = null,
             towers = frame.towers,
             lastFrameWallMs = now,
             lastRaw = null,
         )
         live = session
-        update(session, frame, now)
-        return Event.Started(toRecord(session, complete = false))
+        update(session, frame, localOwner, identitySource, identityVerified, now)
+        return session
     }
 
-    private fun update(session: Live, frame: BattleFrame, now: Long) {
+    private fun update(
+        session: Live,
+        frame: BattleFrame,
+        localOwner: Int,
+        identitySource: String,
+        identityVerified: Boolean,
+        now: Long,
+    ) {
+        if (identityVerified && localOwner in 0..1 && frame.player(localOwner) != null) {
+            session.myOwner = localOwner
+            session.identitySource = identitySource
+            session.identityVerified = true
+        }
         session.lastTick = frame.tick
         session.lastFrameWallMs = now
         session.towers = frame.towers
         session.myCrowns = maxOf(session.myCrowns, crownsFor(frame, session.myOwner))
         session.enemyCrowns = maxOf(session.enemyCrowns, crownsFor(frame, 1 - session.myOwner))
-        if (frame.finalized && session.decidedTick == null) session.decidedTick = frame.tick
 
         for (player in frame.players) {
             session.accounts[player.owner] = player.accountId
@@ -184,10 +218,21 @@ class BattleRecorder(
         }
     }
 
+    private fun maybeFinalize(session: Live, frame: BattleFrame): Event.Finalized? {
+        if (session.finalizedEmitted || !frame.resultValidated || !frame.finalized) return null
+        val winner = frame.resultRaw?.takeIf { it in 0..1 } ?: return null
+        session.finalizedEmitted = true
+        session.decidedTick = frame.tick
+        session.winnerOwner = winner
+        session.nativeResultRaw = frame.resultRaw
+        session.nativeResultValidated = true
+        return Event.Finalized(toRecord(session, Kind.FINALIZED))
+    }
+
     private fun finish(events: MutableList<Event>) {
         val session = live ?: return
         live = null
-        events += Event.Finished(toRecord(session, complete = true))
+        events += Event.Finished(toRecord(session, Kind.FINISHED))
     }
 
     private fun accountsChanged(session: Live, frame: BattleFrame): Boolean {
@@ -201,11 +246,19 @@ class BattleRecorder(
     private fun crownsFor(frame: BattleFrame, owner: Int): Int =
         if (owner in frame.crowns.indices) frame.crowns[owner] else 0
 
-    private fun toRecord(session: Live, complete: Boolean): BattleRecord {
+    private fun toRecord(session: Live, kind: Kind): BattleRecord {
         val myOwner = session.myOwner
         val enemyOwner = 1 - myOwner
-        val endTick = session.decidedTick ?: session.lastTick
+        val endTick = if (kind == Kind.FINALIZED) session.decidedTick!! else session.decidedTick ?: session.lastTick
         val durationTicks = endTick.coerceAtLeast(0)
+        val nativeComplete = kind == Kind.FINALIZED
+        val result = if (nativeComplete && session.identityVerified) {
+            if (session.winnerOwner == myOwner) BattleResult.WIN else BattleResult.LOSS
+        } else if (nativeComplete) {
+            BattleResult.UNKNOWN
+        } else {
+            BattleResult.INCOMPLETE
+        }
 
         val myDeck = deckOf(session, myOwner)
         val enemyDeck = deckOf(session, enemyOwner)
@@ -215,28 +268,30 @@ class BattleRecorder(
             battleUid = session.uid,
             battleTime = session.startWallMs,
             startTime = session.startWallMs,
-            endTime = if (complete) session.startWallMs + durationTicks * TICK_MS else null,
-            durationTicks = if (complete) durationTicks else null,
-            durationSeconds = if (complete) durationTicks * TICK_MS / 1000.0 else null,
+            endTime = if (kind != Kind.STARTED) session.startWallMs + durationTicks * TICK_MS else null,
+            durationTicks = if (kind != Kind.STARTED) durationTicks else null,
+            durationSeconds = if (kind != Kind.STARTED) durationTicks * TICK_MS / 1000.0 else null,
             myPlayerId = session.accounts[myOwner]?.takeIf { it != 0L }?.toString(),
             enemyPlayerId = session.accounts[enemyOwner]?.takeIf { it != 0L }?.toString(),
             myCrowns = session.myCrowns,
             enemyCrowns = session.enemyCrowns,
-            // A live frame is never authoritative for the final outcome. In
-            // particular, 0-0 is a loading/exit state far more often than a
-            // real draw. Only BattleHistoryReconciler may create COMPLETE.
-            result = BattleResult.INCOMPLETE,
-            status = BattleStatus.INCOMPLETE,
+            // Crowns and scene exit never decide the outcome. COMPLETE is only
+            // emitted for a validated/finalized native winner in {0, 1}.
+            result = result,
+            status = if (nativeComplete) BattleStatus.COMPLETE else BattleStatus.INCOMPLETE,
             myDeck = myDeck,
             enemyDeck = enemyDeck,
             enemyArchetype = archetype.archetype,
             enemyArchetypeSubtype = archetype.subtype,
             enemyArchetypeConfidence = archetype.confidence,
-            source = BattleSource.LIVE_CAPTURE,
+            source = if (nativeComplete) BattleSource.NATIVE_RESULT else BattleSource.LIVE_CAPTURE,
             firstTick = session.firstTick,
             lastTick = endTick,
             identitySource = session.identitySource,
             fullBattle = session.firstTick <= FULL_BATTLE_MAX_FIRST_TICK,
+            winnerOwner = session.winnerOwner,
+            nativeResultRaw = session.nativeResultRaw,
+            nativeResultValidated = session.nativeResultValidated,
         )
     }
 
@@ -255,6 +310,10 @@ class BattleRecorder(
     }
 
     private companion object {
+        enum class Kind { STARTED, FINALIZED, FINISHED }
+
+        fun verifiedIdentitySource(source: String): Boolean = source == "CONFIGURED" ||
+            source == "OBSERVED" || source == "LEARNED" || source == "DECK"
         /** One probe tick. `TICK_SECONDS = 0.05` in the bridge's own config. */
         const val TICK_MS = 50L
 

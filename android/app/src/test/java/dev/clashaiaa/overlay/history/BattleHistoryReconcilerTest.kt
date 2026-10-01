@@ -92,4 +92,51 @@ class BattleHistoryReconcilerTest {
         assertNull(outcome.record)
         assertEquals("not_game_history", outcome.rejection)
     }
+
+    @Test
+    fun `validated native result finalizes without Nulls metadata`() {
+        val native = BattleRecord(
+            battleUid = "live:one",
+            battleTime = 1_700_000_000_000,
+            result = BattleResult.UNKNOWN,
+            status = BattleStatus.COMPLETE,
+            source = BattleSource.NATIVE_RESULT,
+            winnerOwner = 1,
+            nativeResultRaw = 1,
+            nativeResultValidated = true,
+        )
+        assertTrue(BattleHistoryReconciler.isFinalized(native))
+    }
+
+    @Test
+    fun `invalid native result is rejected`() {
+        val native = BattleRecord(
+            battleUid = "live:one",
+            battleTime = 1_700_000_000_000,
+            status = BattleStatus.COMPLETE,
+            source = BattleSource.NATIVE_RESULT,
+            winnerOwner = 1,
+            nativeResultRaw = 2,
+            nativeResultValidated = true,
+        )
+        assertFalse(BattleHistoryReconciler.isFinalized(native))
+        assertFalse(BattleHistoryReconciler.isFinalized(native.copy(nativeResultValidated = false)))
+    }
+
+    @Test
+    fun `Nulls enrichment keeps the matched native uid`() {
+        val native = authoritative().copy(
+            battleUid = "live:native",
+            battleId = null,
+            replayId = null,
+            source = BattleSource.NATIVE_RESULT,
+            winnerOwner = 0,
+            nativeResultRaw = 0,
+            nativeResultValidated = true,
+        )
+        val outcome = BattleHistoryReconciler.finalize(authoritative(), listOf(native))
+        assertEquals("live:native", outcome.record!!.battleUid)
+        assertEquals("live:native", outcome.matchedLiveUid)
+        assertEquals(BattleSource.NULLS_HISTORY, outcome.record!!.source)
+    }
 }

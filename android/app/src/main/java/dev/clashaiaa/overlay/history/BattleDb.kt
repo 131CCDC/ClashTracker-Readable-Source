@@ -30,6 +30,7 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(CREATE_BATTLES)
         db.execSQL(CREATE_BATTLE_CARDS)
+        db.execSQL(CREATE_CARD_PLAYS)
         db.execSQL(CREATE_META)
         for (statement in INDEXES) db.execSQL(statement)
         writeVersion(db, SCHEMA_VERSION)
@@ -77,7 +78,7 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
 
     companion object {
         const val NAME = "clashtracker_history.db"
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
 
         private const val CREATE_BATTLES = """
             CREATE TABLE battles (
@@ -117,6 +118,9 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
                 last_tick INTEGER,
                 identity_source TEXT,
                 full_battle INTEGER NOT NULL DEFAULT 0,
+                winner_owner INTEGER,
+                native_result_raw INTEGER,
+                native_result_validated INTEGER NOT NULL DEFAULT 0,
                 raw_json TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -147,6 +151,28 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             )
         """
 
+        internal const val CREATE_CARD_PLAYS = """
+            CREATE TABLE card_plays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                battle_uid TEXT NOT NULL REFERENCES battles(battle_uid) ON DELETE CASCADE,
+                event_key TEXT NOT NULL,
+                issuer_account_id INTEGER NOT NULL,
+                owner INTEGER,
+                is_self INTEGER,
+                card_id INTEGER NOT NULL,
+                target_x INTEGER,
+                target_y INTEGER,
+                server_tick INTEGER,
+                exec_tick INTEGER,
+                semantic_tick INTEGER,
+                semantic_ms INTEGER,
+                command_sequence INTEGER,
+                source TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(battle_uid, event_key)
+            )
+        """
+
         private val INDEXES = listOf(
             "CREATE INDEX idx_battles_time ON battles(battle_time)",
             "CREATE INDEX idx_battles_result ON battles(result)",
@@ -154,6 +180,10 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             "CREATE INDEX idx_battles_source ON battles(source)",
             "CREATE INDEX idx_cards_uid ON battle_cards(battle_uid)",
             "CREATE INDEX idx_cards_card ON battle_cards(card_id)",
+            "CREATE INDEX idx_card_plays_battle_uid ON card_plays(battle_uid)",
+            "CREATE INDEX idx_card_plays_card_id ON card_plays(card_id)",
+            "CREATE INDEX idx_card_plays_server_tick ON card_plays(server_tick)",
+            "CREATE INDEX idx_card_plays_owner ON card_plays(owner)",
         )
 
         /**
@@ -162,7 +192,22 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
          * ships; adding a column means bumping [SCHEMA_VERSION] and adding the
          * matching `ALTER TABLE` here in the same commit.
          */
-        private val MIGRATIONS: Map<Int, (SQLiteDatabase) -> Unit> = emptyMap()
+        internal val MIGRATION_1_TO_2 = listOf(
+            "ALTER TABLE battles ADD COLUMN winner_owner INTEGER",
+            "ALTER TABLE battles ADD COLUMN native_result_raw INTEGER",
+            "ALTER TABLE battles ADD COLUMN native_result_validated INTEGER NOT NULL DEFAULT 0",
+            CREATE_CARD_PLAYS,
+            "CREATE INDEX idx_card_plays_battle_uid ON card_plays(battle_uid)",
+            "CREATE INDEX idx_card_plays_card_id ON card_plays(card_id)",
+            "CREATE INDEX idx_card_plays_server_tick ON card_plays(server_tick)",
+            "CREATE INDEX idx_card_plays_owner ON card_plays(owner)",
+        )
+
+        private val MIGRATIONS: Map<Int, (SQLiteDatabase) -> Unit> = mapOf(
+            1 to { database ->
+                for (statement in MIGRATION_1_TO_2) database.execSQL(statement)
+            },
+        )
     }
 }
 
@@ -205,10 +250,14 @@ class BattleDao(private val db: BattleDb) {
     /** Raw rows, including legacy diagnostics. Never use for user-facing history. */
     fun all(): List<BattleRecord> = read("SELECT * FROM battles ORDER BY battle_time DESC", null)
 
-    /** Only structurally valid records finalized by the game-owned history source. */
+    /** Structurally valid records finalized by either game-owned source. */
     fun finalized(): List<BattleRecord> = read(
-        "SELECT * FROM battles WHERE status = ? AND source = ? ORDER BY battle_time DESC",
-        arrayOf(BattleStatus.COMPLETE.wire, BattleSource.NULLS_HISTORY.wire),
+        "SELECT * FROM battles WHERE status = ? AND source IN (?, ?) ORDER BY battle_time DESC",
+        arrayOf(
+            BattleStatus.COMPLETE.wire,
+            BattleSource.NULLS_HISTORY.wire,
+            BattleSource.NATIVE_RESULT.wire,
+        ),
     ).filter(BattleHistoryReconciler::isFinalized)
 
     fun recent(limit: Int): List<BattleRecord> =
@@ -237,6 +286,7 @@ class BattleDao(private val db: BattleDb) {
     fun deleteAll() {
         db.writableDatabase.beginTransaction()
         try {
+            db.writableDatabase.execSQL("DELETE FROM card_plays")
             db.writableDatabase.execSQL("DELETE FROM battle_cards")
             db.writableDatabase.execSQL("DELETE FROM battles")
             db.writableDatabase.setTransactionSuccessful()
@@ -352,6 +402,9 @@ class BattleDao(private val db: BattleDb) {
             put("last_tick", record.lastTick)
             put("identity_source", record.identitySource)
             put("full_battle", if (record.fullBattle) 1 else 0)
+            put("winner_owner", record.winnerOwner)
+            put("native_result_raw", record.nativeResultRaw)
+            put("native_result_validated", if (record.nativeResultValidated) 1 else 0)
             put("raw_json", record.rawJson)
             put("created_at", createdAt ?: now)
             put("updated_at", now)
@@ -411,6 +464,9 @@ class BattleDao(private val db: BattleDb) {
         lastTick = cursor.getIntOrNull("last_tick"),
         identitySource = cursor.getStringOrNull("identity_source"),
         fullBattle = cursor.getInt(cursor.getColumnIndexOrThrow("full_battle")) != 0,
+        winnerOwner = cursor.getIntOrNull("winner_owner"),
+        nativeResultRaw = cursor.getIntOrNull("native_result_raw"),
+        nativeResultValidated = cursor.getInt(cursor.getColumnIndexOrThrow("native_result_validated")) != 0,
         rawJson = cursor.getStringOrNull("raw_json"),
     )
 }

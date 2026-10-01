@@ -520,6 +520,7 @@ class HistoryActivity : Activity() {
     private fun sourceLabel(record: BattleRecord): String = when (record.source) {
         BattleSource.LIVE_CAPTURE -> "实时记录 (live_capture)"
         BattleSource.NULLS_HISTORY -> "Nulls 历史 (nulls_history)"
+        BattleSource.NATIVE_RESULT -> "原生结算 (native_result)"
     }
 
     // --------------------------------------------------------- actions --

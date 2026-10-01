@@ -32,6 +32,9 @@ object BattleHistoryReconciler {
             ?.first
 
         val finalized = canonical.copy(
+            // Enrich an already persisted native/live row in place. Only use a
+            // new Null's uid when no conservative local match exists.
+            battleUid = live?.battleUid ?: canonical.battleUid,
             battleTime = if (!authoritativeTimeKnown && live != null) live.battleTime else canonical.battleTime,
             startTime = live?.startTime ?: canonical.startTime,
             endTime = when {
@@ -73,8 +76,16 @@ object BattleHistoryReconciler {
     }
 
     private fun rejectionReason(record: BattleRecord): String? {
-        if (record.source != BattleSource.NULLS_HISTORY) return "not_game_history"
         if (record.status != BattleStatus.COMPLETE) return "status_not_complete"
+        if (record.source == BattleSource.NATIVE_RESULT) {
+            if (!record.nativeResultValidated) return "native_result_not_validated"
+            val winner = record.winnerOwner ?: return "native_winner_missing"
+            if (winner !in 0..1 || record.nativeResultRaw != winner) return "native_result_invalid"
+            // Result may intentionally be UNKNOWN when local identity was not
+            // verified; winnerOwner remains authoritative world-seat evidence.
+            return null
+        }
+        if (record.source != BattleSource.NULLS_HISTORY) return "not_game_history"
         if (!record.decided) return "outcome_not_final"
         val me = cleanId(record.myPlayerId) ?: return "my_player_id_missing"
         val enemy = cleanId(record.enemyPlayerId) ?: return "enemy_player_id_missing"
@@ -94,7 +105,9 @@ object BattleHistoryReconciler {
             deck.map { it.cardId }.toSet().size == 8
 
     private fun matchScore(auth: BattleRecord, live: BattleRecord, authTimeKnown: Boolean): Int {
-        if (live.source != BattleSource.LIVE_CAPTURE) return Int.MIN_VALUE
+        if (live.source != BattleSource.LIVE_CAPTURE && live.source != BattleSource.NATIVE_RESULT) {
+            return Int.MIN_VALUE
+        }
         var score = 0
         val authMe = cleanId(auth.myPlayerId)
         val authEnemy = cleanId(auth.enemyPlayerId)
@@ -151,12 +164,17 @@ object BattleWorkingSessions {
     fun observe(event: BattleRecorder.Event) {
         when (event) {
             is BattleRecorder.Event.Started -> active = event.record
+            is BattleRecorder.Event.Finalized -> {
+                if (active?.battleUid == event.record.battleUid) active = event.record
+                completed[event.record.battleUid] = event.record
+                trimCompleted()
+            }
             is BattleRecorder.Event.Finished -> {
                 if (active?.battleUid == event.record.battleUid) active = null
-                completed[event.record.battleUid] = event.record
-                while (completed.size > MAX_COMPLETED) {
-                    completed.remove(completed.keys.first())
-                }
+                // Do not replace the authoritative native finalization with a
+                // diagnostic scene-exit record.
+                completed.putIfAbsent(event.record.battleUid, event.record)
+                trimCompleted()
             }
         }
     }
@@ -173,5 +191,9 @@ object BattleWorkingSessions {
     fun clear() {
         active = null
         completed.clear()
+    }
+
+    private fun trimCompleted() {
+        while (completed.size > MAX_COMPLETED) completed.remove(completed.keys.first())
     }
 }

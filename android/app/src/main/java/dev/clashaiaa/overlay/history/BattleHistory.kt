@@ -46,19 +46,19 @@ object BattleHistory {
         return executor.submit<T> { block(target) }
     }
 
-    /**
-     * Persist a finalized authoritative record. Live/incomplete/malformed rows
-     * are rejected at this last boundary even if a caller regresses later.
-     */
+    /** Persist a crash-safe start row or an authoritative finalized row. */
     fun save(context: Context, record: BattleRecord): Boolean {
-        if (!BattleHistoryReconciler.isFinalized(record)) {
-            Log.w(TAG, "[History] rejected non-finalized row uid=${record.battleUid}")
+        val crashSafeStart = record.source == BattleSource.LIVE_CAPTURE &&
+            record.status == BattleStatus.INCOMPLETE && record.result == BattleResult.INCOMPLETE
+        if (!crashSafeStart && !BattleHistoryReconciler.isFinalized(record)) {
+            Log.w(TAG, "[History] rejected invalid row uid=${record.battleUid}")
             return false
         }
         val target = dao(context)
         executor.execute {
             runCatching { target.upsert(record) }
-            notifyChanged()
+                .onSuccess { notifyChanged() }
+                .onFailure { Log.w(TAG, "[History] save failed uid=${record.battleUid}", it) }
         }
         return true
     }

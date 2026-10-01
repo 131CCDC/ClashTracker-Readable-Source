@@ -76,6 +76,7 @@ class BattleFrameTest {
         assertNotNull(frame)
         assertEquals(0, frame!!.tick)
         assertEquals(1234567L, frame.monotonicMs)
+        assertTrue(frame.resultValidated)
         assertFalse(frame.finalized)
         assertEquals(listOf(1, 0), frame.crowns)
         assertEquals(2, frame.players.size)
@@ -131,6 +132,7 @@ class BattleFrameTest {
     fun `a frame missing battle_result does not crash`() {
         val frame = BattleFrame.parse("""{"in_battle":true,"tick":5,"players":[],"crowns":[]}""")!!
         assertFalse(frame.finalized)
+        assertFalse(frame.resultValidated)
         assertNull(frame.resultRaw)
         assertTrue(frame.crowns.isEmpty())
     }
@@ -140,6 +142,7 @@ class BattleFrameTest {
         val frame = BattleFrame.parse(
             """{"in_battle":true,"tick":100,"battle_result":{"validated":true,"finalized":true,"world_result_raw":1},"players":[],"crowns":[2,1]}""",
         )!!
+        assertTrue(frame.resultValidated)
         assertTrue(frame.finalized)
         assertEquals(1, frame.resultRaw)
         assertEquals(listOf(2, 1), frame.crowns)

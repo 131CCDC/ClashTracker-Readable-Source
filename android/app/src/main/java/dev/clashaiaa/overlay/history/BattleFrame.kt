@@ -52,6 +52,8 @@ data class BattleFrame(
     val crowns: List<Int>,
     val players: List<FramePlayer>,
     val towers: List<FrameTower>,
+    /** Native validation bit; finalization is authoritative only when both are true. */
+    val resultValidated: Boolean = false,
 ) {
     fun player(owner: Int): FramePlayer? = players.firstOrNull { it.owner == owner }
 
@@ -71,19 +73,22 @@ data class BattleFrame(
                     crowns = emptyList(),
                     players = emptyList(),
                     towers = emptyList(),
+                    resultValidated = false,
                 )
             } else {
+                val battleResult = root.optJSONObject("battle_result")
                 BattleFrame(
                     inBattle = true,
                     stale = root.optString("status", "") == "stale",
                     tick = root.optInt("tick", -1),
                     monotonicMs = root.optLong("monotonic_ms", -1L).takeIf { it >= 0 },
-                    finalized = root.optJSONObject("battle_result")?.optBoolean("finalized", false) == true,
-                    resultRaw = root.optJSONObject("battle_result")?.optInt("world_result_raw", Int.MIN_VALUE)
+                    finalized = battleResult?.optBoolean("finalized", false) == true,
+                    resultRaw = battleResult?.optInt("world_result_raw", Int.MIN_VALUE)
                         ?.takeIf { it != Int.MIN_VALUE },
                     crowns = parseCrowns(root),
                     players = parsePlayers(root),
                     towers = parseTowers(root),
+                    resultValidated = battleResult?.optBoolean("validated", false) == true,
                 )
             }
         } catch (ignored: Exception) {

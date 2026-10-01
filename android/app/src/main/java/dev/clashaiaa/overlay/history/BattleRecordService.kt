@@ -24,7 +24,8 @@ import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Maintains transient live telemetry and finalizes only from game history.
+ * Persists a crash-safe live row and finalizes directly from the validated
+ * game-owned native result. Battle Log payloads are optional enrichment.
  *
  * This service is the module's whole runtime. It is deliberately separate from
  * [dev.clashaiaa.overlay.OverlayService]: the HUD can be off, on, restarted or
@@ -35,9 +36,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Lifecycle per battle:
  *
  * ```
- * BattleStart  -> one in-memory working session
- * BattleEnd    -> bounded pending diagnostic
- * Stable idle  -> authoritative Battle Log reconciliation -> one final row
+ * BattleStart       -> persist INCOMPLETE
+ * NativeFinalized   -> persist COMPLETE once
+ * BattleEnd         -> diagnostic only
+ * Stable idle       -> optional Battle Log enrichment of the same uid
  * ```
  */
 class BattleRecordService : Service() {
@@ -165,7 +167,12 @@ class BattleRecordService : Service() {
                     lastStatus = "等待下一场"
                     updateNotification()
                 }
-                val events = recorder.onFrame(frame, resolved.owner, resolved.source.name)
+                val events = recorder.onFrame(
+                    frame,
+                    resolved.owner,
+                    resolved.source.name,
+                    resolved.verified,
+                )
                 for (recorded in events) observe(recorded)
             }
         }
@@ -182,12 +189,23 @@ class BattleRecordService : Service() {
         when (event) {
             is BattleRecorder.Event.Started -> {
                 Log.i(TAG, "[Battle] working session created uid=${event.record.battleUid}")
+                BattleHistory.save(this, event.record)
                 lastStatus = "对战会话已建立（等待结算）"
                 updateNotification()
             }
+            is BattleRecorder.Event.Finalized -> {
+                Log.i(
+                    TAG,
+                    "[Battle] native result finalized uid=${event.record.battleUid} " +
+                        "winner=${event.record.winnerOwner} result=${event.record.result.wire}",
+                )
+                BattleHistory.save(this, event.record)
+                lastStatus = "原生结算已保存"
+                updateNotification()
+            }
             is BattleRecorder.Event.Finished -> {
-                Log.i(TAG, "[Battle] battle scene exited; waiting for finalized record uid=${event.record.battleUid}")
-                lastStatus = "已离开对战 · 等待 Battle Log 结算"
+                Log.i(TAG, "[Battle] battle scene exited uid=${event.record.battleUid}")
+                lastStatus = "已离开对战"
                 updateNotification()
                 handler.postDelayed({ reconcileWhenIdle() }, POST_BATTLE_RECONCILE_DELAY_MS)
             }

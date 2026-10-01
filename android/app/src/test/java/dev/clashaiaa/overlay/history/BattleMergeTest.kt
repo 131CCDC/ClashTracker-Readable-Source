@@ -113,4 +113,30 @@ class BattleMergeTest {
         assertEquals(1, merged.myDeck.size)
         assertEquals(1, merged.enemyDeck.size)
     }
+
+    @Test
+    fun `Nulls enrichment preserves native result evidence`() {
+        val stored = stub().copy(
+            result = BattleResult.WIN,
+            status = BattleStatus.COMPLETE,
+            source = BattleSource.NATIVE_RESULT,
+            winnerOwner = 0,
+            nativeResultRaw = 0,
+            nativeResultValidated = true,
+        )
+        val imported = authoritativeEnrichment(stored.battleUid, stored.battleTime)
+        val merged = mergeBattleRecords(stored, imported)
+        assertEquals(0, merged.winnerOwner)
+        assertEquals(0, merged.nativeResultRaw)
+        assertTrue(merged.nativeResultValidated)
+    }
+
+    private fun authoritativeEnrichment(uid: String, time: Long) = BattleRecord(
+        battleUid = uid,
+        battleTime = time,
+        battleId = "B8",
+        result = BattleResult.WIN,
+        status = BattleStatus.COMPLETE,
+        source = BattleSource.NULLS_HISTORY,
+    )
 }

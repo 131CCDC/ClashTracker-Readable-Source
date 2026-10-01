@@ -32,7 +32,10 @@ enum class BattleSource(val wire: String) {
     NULLS_HISTORY("nulls_history"),
 
     /** Captured live by this device from the native probe. */
-    LIVE_CAPTURE("live_capture");
+    LIVE_CAPTURE("live_capture"),
+
+    /** Finalized directly from the game's validated native result. */
+    NATIVE_RESULT("native_result");
 
     companion object {
         fun fromWire(value: String?): BattleSource =
@@ -128,6 +131,12 @@ data class BattleRecord(
     val identitySource: String? = null,
     /** `true` when the whole battle was observed from tick ~0. */
     val fullBattle: Boolean = false,
+    /** World owner (0/1) declared the winner by the native result. */
+    val winnerOwner: Int? = null,
+    /** Unmodified `world_result_raw` value retained for diagnostics. */
+    val nativeResultRaw: Int? = null,
+    /** Whether the game marked the native result as validated. */
+    val nativeResultValidated: Boolean = false,
     val rawJson: String? = null,
 ) {
     val decided: Boolean
@@ -186,5 +195,8 @@ internal fun mergeBattleRecords(old: BattleRecord, new: BattleRecord): BattleRec
     lastTick = new.lastTick ?: old.lastTick,
     identitySource = new.identitySource ?: old.identitySource,
     fullBattle = new.fullBattle || old.fullBattle,
+    winnerOwner = new.winnerOwner ?: old.winnerOwner,
+    nativeResultRaw = new.nativeResultRaw ?: old.nativeResultRaw,
+    nativeResultValidated = new.nativeResultValidated || old.nativeResultValidated,
     rawJson = new.rawJson ?: old.rawJson,
 )

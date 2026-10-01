@@ -35,6 +35,8 @@ class BattleRecorderTest {
         tick: Int,
         crowns: List<Int> = listOf(0, 0),
         finalized: Boolean = false,
+        validated: Boolean = false,
+        resultRaw: Int? = 0,
         decks: Map<Int, List<FrameCard>> = mapOf(
             0 to listOf(card(0, 26000021), card(1, 28000011)),
             1 to listOf(card(0, 26000032), card(1, 28000009)),
@@ -47,12 +49,13 @@ class BattleRecorderTest {
         tick = tick,
         monotonicMs = null,
         finalized = finalized,
-        resultRaw = 0,
+        resultRaw = resultRaw,
         crowns = crowns,
         players = decks.map { (owner, cards) ->
             FramePlayer(owner, accounts[owner] ?: 0L, 5.0f, cards)
         },
         towers = towers,
+        resultValidated = validated,
     )
 
     private fun idleFrame() = BattleFrame(
@@ -96,6 +99,88 @@ class BattleRecorderTest {
         assertEquals(2, finished.record.myCrowns)
         assertEquals(0, finished.record.enemyCrowns)
         assertEquals(1_700_000_010_000L, finished.record.endTime!!)
+    }
+
+    @Test
+    fun `validated native result finalizes exactly once using the decided tick`() {
+        recorder.onFrame(frame(0), 0, "CONFIGURED")
+        val events = recorder.onFrame(
+            frame(120, crowns = listOf(2, 1), finalized = true, validated = true, resultRaw = 0),
+            0,
+            "CONFIGURED",
+        )
+        val finalized = events.single() as BattleRecorder.Event.Finalized
+        assertEquals(BattleStatus.COMPLETE, finalized.record.status)
+        assertEquals(BattleSource.NATIVE_RESULT, finalized.record.source)
+        assertEquals(BattleResult.WIN, finalized.record.result)
+        assertEquals(0, finalized.record.winnerOwner)
+        assertEquals(0, finalized.record.nativeResultRaw)
+        assertTrue(finalized.record.nativeResultValidated)
+        assertEquals(120, finalized.record.durationTicks)
+        assertEquals(6.0, finalized.record.durationSeconds!!, 1e-9)
+
+        assertTrue(
+            recorder.onFrame(
+                frame(121, finalized = true, validated = true, resultRaw = 0),
+                0,
+                "CONFIGURED",
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `verified local identity maps the other native owner to loss`() {
+        recorder.onFrame(frame(0), 0, "OBSERVED")
+        val event = recorder.onFrame(
+            frame(100, finalized = true, validated = true, resultRaw = 1),
+            0,
+            "OBSERVED",
+        ).single() as BattleRecorder.Event.Finalized
+        assertEquals(BattleResult.LOSS, event.record.result)
+        assertEquals(1, event.record.winnerOwner)
+    }
+
+    @Test
+    fun `unverified seat preserves native winner but not device outcome`() {
+        recorder.onFrame(frame(0), 0, "SEAT_FALLBACK", identityVerified = false)
+        val event = recorder.onFrame(
+            frame(100, finalized = true, validated = true, resultRaw = 1),
+            0,
+            "SEAT_FALLBACK",
+            identityVerified = false,
+        ).single() as BattleRecorder.Event.Finalized
+        assertEquals(BattleStatus.COMPLETE, event.record.status)
+        assertEquals(BattleResult.UNKNOWN, event.record.result)
+        assertEquals(1, event.record.winnerOwner)
+        assertEquals(1, event.record.nativeResultRaw)
+    }
+
+    @Test
+    fun `raw draw-like code never finalizes and never becomes draw`() {
+        recorder.onFrame(frame(0), 0, "CONFIGURED")
+        assertTrue(
+            recorder.onFrame(
+                frame(100, finalized = true, validated = true, resultRaw = 2),
+                0,
+                "CONFIGURED",
+            ).isEmpty(),
+        )
+        val finished = recorder.onFrame(idleFrame(), 0, "CONFIGURED")
+            .single() as BattleRecorder.Event.Finished
+        assertEquals(BattleStatus.INCOMPLETE, finished.record.status)
+        assertEquals(BattleResult.INCOMPLETE, finished.record.result)
+    }
+
+    @Test
+    fun `unvalidated raw winner never finalizes`() {
+        recorder.onFrame(frame(0), 0, "CONFIGURED")
+        assertTrue(
+            recorder.onFrame(
+                frame(100, finalized = true, validated = false, resultRaw = 0),
+                0,
+                "CONFIGURED",
+            ).isEmpty(),
+        )
     }
 
     @Test
