@@ -168,7 +168,10 @@ class BattleRecorderTest {
         val finished = recorder.onFrame(idleFrame(), 0, "CONFIGURED")
             .single() as BattleRecorder.Event.Finished
         assertEquals(BattleStatus.INCOMPLETE, finished.record.status)
-        assertEquals(BattleResult.INCOMPLETE, finished.record.result)
+        assertEquals(BattleResult.UNKNOWN, finished.record.result)
+        assertEquals(2, finished.record.nativeResultRaw)
+        assertTrue(finished.record.nativeResultValidated)
+        assertNull(finished.record.winnerOwner)
     }
 
     @Test

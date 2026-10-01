@@ -69,6 +69,10 @@ class BattleRecorder(
     /** Stable uid of the active battle, used to attach semantic event rows. */
     val activeBattleUid: String? get() = live?.uid
 
+    /** Accounts in the active frame, used to keep pre-frame Ghost rows battle-local. */
+    val activeAccountIds: Set<Long>
+        get() = live?.accounts?.values?.filterTo(LinkedHashSet()) { it != 0L }.orEmpty()
+
     /**
      * Feed one probe frame.
      *
@@ -220,12 +224,12 @@ class BattleRecorder(
 
     private fun maybeFinalize(session: Live, frame: BattleFrame): Event.Finalized? {
         if (session.finalizedEmitted || !frame.resultValidated || !frame.finalized) return null
-        val winner = frame.resultRaw?.takeIf { it in 0..1 } ?: return null
-        session.finalizedEmitted = true
-        session.decidedTick = frame.tick
-        session.winnerOwner = winner
         session.nativeResultRaw = frame.resultRaw
         session.nativeResultValidated = true
+        session.decidedTick = session.decidedTick ?: frame.tick
+        val winner = frame.resultRaw?.takeIf { it in 0..1 } ?: return null
+        session.finalizedEmitted = true
+        session.winnerOwner = winner
         return Event.Finalized(toRecord(session, Kind.FINALIZED))
     }
 
@@ -252,9 +256,14 @@ class BattleRecorder(
         val endTick = if (kind == Kind.FINALIZED) session.decidedTick!! else session.decidedTick ?: session.lastTick
         val durationTicks = endTick.coerceAtLeast(0)
         val nativeComplete = kind == Kind.FINALIZED
+        val nativeRaw = session.nativeResultRaw
+        val unsupportedNativeResult = kind == Kind.FINISHED &&
+            session.nativeResultValidated && (nativeRaw == null || nativeRaw !in 0..1)
         val result = if (nativeComplete && session.identityVerified) {
             if (session.winnerOwner == myOwner) BattleResult.WIN else BattleResult.LOSS
         } else if (nativeComplete) {
+            BattleResult.UNKNOWN
+        } else if (unsupportedNativeResult) {
             BattleResult.UNKNOWN
         } else {
             BattleResult.INCOMPLETE

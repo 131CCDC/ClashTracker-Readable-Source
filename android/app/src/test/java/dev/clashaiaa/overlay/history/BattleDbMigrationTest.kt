@@ -17,6 +17,7 @@ class BattleDbMigrationTest {
         assertTrue(sql.contains("CREATE TABLE CARD_PLAYS"))
         assertTrue(sql.contains("REFERENCES BATTLES(BATTLE_UID) ON DELETE CASCADE"))
         assertTrue(sql.contains("UNIQUE(BATTLE_UID, EVENT_KEY)"))
+        assertFalse(sql.contains("CARD_ID INTEGER NOT NULL"))
         assertTrue(sql.contains("IDX_CARD_PLAYS_BATTLE_UID"))
         assertTrue(sql.contains("IDX_CARD_PLAYS_CARD_ID"))
         assertTrue(sql.contains("IDX_CARD_PLAYS_SERVER_TICK"))

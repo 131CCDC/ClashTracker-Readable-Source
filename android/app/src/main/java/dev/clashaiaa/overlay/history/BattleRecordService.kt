@@ -16,8 +16,10 @@ import dev.clashaiaa.overlay.GhostClient
 import dev.clashaiaa.overlay.GhostProbeEvent
 import dev.clashaiaa.overlay.HistoryActivity
 import dev.clashaiaa.overlay.IdentityResolver
+import dev.clashaiaa.overlay.LocalIdentity
 import dev.clashaiaa.overlay.ProbeClient
 import dev.clashaiaa.overlay.ProbeEvent
+import dev.clashaiaa.overlay.BattleState
 import dev.clashaiaa.overlay.R
 import dev.clashaiaa.overlay.SettingsStore
 import java.util.concurrent.Executor
@@ -48,6 +50,7 @@ class BattleRecordService : Service() {
     private val mainExecutor = Executor { command -> handler.post(command) }
     private val names by lazy { CardNames(this) }
     private val recorder by lazy { BattleRecorder(names) }
+    private val cardPlayRecorder = CardPlayRecorder()
 
     private val identityResolver = IdentityResolver(
         notifyLearned = { accountId -> SettingsStore.saveLearnedAccountId(this, accountId) },
@@ -59,6 +62,8 @@ class BattleRecordService : Service() {
     private var lastStatus = "等待探针"
     private val reconciling = AtomicBoolean(false)
     private var lastReconcileFingerprint = ""
+    private var latestProbeState: BattleState? = null
+    private var currentIdentity: LocalIdentity = LocalIdentity.UNKNOWN
 
     /** Fires while no frame is arriving, so a dead link still closes the battle. */
     private val idleTicker = object : Runnable {
@@ -157,8 +162,10 @@ class BattleRecordService : Service() {
                 for (finished in recorder.onIdle()) observe(finished)
             }
             is ProbeEvent.Snapshot -> {
+                latestProbeState = event.state
                 runCatching { identityResolver.onFrame(event.state) }
                 val resolved = identityResolver.identity(event.state)
+                currentIdentity = resolved
                 val frame = BattleFrame.parse(event.raw) ?: return
                 if (frame.inBattle && !frame.stale) {
                     lastStatus = "对战中 · tick ${frame.tick}"
@@ -181,6 +188,15 @@ class BattleRecordService : Service() {
     private fun onGhostEvent(event: GhostProbeEvent) {
         if (event is GhostProbeEvent.Snapshot) {
             runCatching { identityResolver.onGhost(event.feed) }
+            currentIdentity = identityResolver.identity(latestProbeState)
+            val records = cardPlayRecorder.observe(
+                feed = event.feed,
+                activeBattleUid = recorder.activeBattleUid,
+                activeAccountIds = recorder.activeAccountIds,
+                identity = currentIdentity,
+                receivedAtMs = event.receivedAtMs,
+            )
+            BattleHistory.saveCardPlays(this, records)
         }
     }
 
@@ -190,6 +206,14 @@ class BattleRecordService : Service() {
             is BattleRecorder.Event.Started -> {
                 Log.i(TAG, "[Battle] working session created uid=${event.record.battleUid}")
                 BattleHistory.save(this, event.record)
+                BattleHistory.saveCardPlays(
+                    this,
+                    cardPlayRecorder.attachPending(
+                        event.record.battleUid,
+                        recorder.activeAccountIds,
+                        currentIdentity,
+                    ),
+                )
                 lastStatus = "对战会话已建立（等待结算）"
                 updateNotification()
             }
@@ -205,6 +229,9 @@ class BattleRecordService : Service() {
             }
             is BattleRecorder.Event.Finished -> {
                 Log.i(TAG, "[Battle] battle scene exited uid=${event.record.battleUid}")
+                // Finalized rows were already saved authoritatively. Otherwise
+                // update the crash-safe row with duration and any raw evidence.
+                if (event.record.winnerOwner == null) BattleHistory.save(this, event.record)
                 lastStatus = "已离开对战"
                 updateNotification()
                 handler.postDelayed({ reconcileWhenIdle() }, POST_BATTLE_RECONCILE_DELAY_MS)

@@ -49,7 +49,8 @@ object BattleHistory {
     /** Persist a crash-safe start row or an authoritative finalized row. */
     fun save(context: Context, record: BattleRecord): Boolean {
         val crashSafeStart = record.source == BattleSource.LIVE_CAPTURE &&
-            record.status == BattleStatus.INCOMPLETE && record.result == BattleResult.INCOMPLETE
+            record.status == BattleStatus.INCOMPLETE &&
+            record.result in setOf(BattleResult.INCOMPLETE, BattleResult.UNKNOWN)
         if (!crashSafeStart && !BattleHistoryReconciler.isFinalized(record)) {
             Log.w(TAG, "[History] rejected invalid row uid=${record.battleUid}")
             return false
@@ -59,6 +60,21 @@ object BattleHistory {
             runCatching { target.upsert(record) }
                 .onSuccess { notifyChanged() }
                 .onFailure { Log.w(TAG, "[History] save failed uid=${record.battleUid}", it) }
+        }
+        return true
+    }
+
+    /** Persist semantic events on the same executor as their parent battle row. */
+    fun saveCardPlays(context: Context, records: List<CardPlayRecord>): Boolean {
+        if (records.isEmpty()) return true
+        if (records.any { it.battleUid.isBlank() || it.eventKey.isBlank() || it.issuerAccountId == 0L }) {
+            Log.w(TAG, "[History] rejected malformed semantic card-play batch")
+            return false
+        }
+        val target = dao(context)
+        executor.execute {
+            runCatching { target.insertCardPlays(records) }
+                .onFailure { Log.w(TAG, "[History] card-play save failed", it) }
         }
         return true
     }

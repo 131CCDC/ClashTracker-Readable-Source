@@ -13,6 +13,10 @@ data class GhostDropEvent(
     val serverTick: Int,
     val execTick: Int,
     val commandSequence: Long,
+    /** Tick chosen by the semantic decoder, when it differs from wire timing. */
+    val semanticTick: Int? = null,
+    /** Semantic event time in milliseconds, when the probe publishes it. */
+    val semanticMs: Long? = null,
 ) {
     val key: String get() = "$issuerAccountId:$serverTick:$commandSequence"
 }
@@ -53,6 +57,8 @@ object GhostJson {
                     serverTick = row.optInt("server_tick", -1),
                     execTick = row.optInt("exec_tick", -1),
                     commandSequence = row.optLong("command_sequence", 0L),
+                    semanticTick = row.optNullableInt("semantic_tick"),
+                    semanticMs = row.optNullableLong("semantic_ms"),
                 )
             }
         }
@@ -67,6 +73,12 @@ object GhostJson {
         )
     }
 }
+
+private fun JSONObject.optNullableInt(name: String): Int? =
+    if (has(name) && !isNull(name)) optInt(name) else null
+
+private fun JSONObject.optNullableLong(name: String): Long? =
+    if (has(name) && !isNull(name)) optLong(name) else null
 
 data class GhostMarker(
     val event: GhostDropEvent,

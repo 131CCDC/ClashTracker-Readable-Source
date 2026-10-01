@@ -154,12 +154,12 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
         internal const val CREATE_CARD_PLAYS = """
             CREATE TABLE card_plays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                battle_uid TEXT NOT NULL REFERENCES battles(battle_uid) ON DELETE CASCADE,
+                battle_uid TEXT NOT NULL,
                 event_key TEXT NOT NULL,
                 issuer_account_id INTEGER NOT NULL,
                 owner INTEGER,
                 is_self INTEGER,
-                card_id INTEGER NOT NULL,
+                card_id INTEGER,
                 target_x INTEGER,
                 target_y INTEGER,
                 server_tick INTEGER,
@@ -169,7 +169,8 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
                 command_sequence INTEGER,
                 source TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                UNIQUE(battle_uid, event_key)
+                UNIQUE(battle_uid, event_key),
+                FOREIGN KEY(battle_uid) REFERENCES battles(battle_uid) ON DELETE CASCADE
             )
         """
 
@@ -244,6 +245,81 @@ class BattleDao(private val db: BattleDb) {
             return existing == null
         } finally {
             database.endTransaction()
+        }
+    }
+
+    /** Inserts semantic plays idempotently; duplicate polls are ignored. */
+    fun insertCardPlays(records: List<CardPlayRecord>): Int {
+        if (records.isEmpty()) return 0
+        val database = db.writableDatabase
+        var inserted = 0
+        database.beginTransaction()
+        try {
+            for (record in records) {
+                val values = ContentValues().apply {
+                    put("battle_uid", record.battleUid)
+                    put("event_key", record.eventKey)
+                    put("issuer_account_id", record.issuerAccountId)
+                    if (record.owner == null) putNull("owner") else put("owner", record.owner)
+                    if (record.isSelf == null) putNull("is_self") else put("is_self", if (record.isSelf) 1 else 0)
+                    if (record.cardId == null) putNull("card_id") else put("card_id", record.cardId)
+                    if (record.targetX == null) putNull("target_x") else put("target_x", record.targetX)
+                    if (record.targetY == null) putNull("target_y") else put("target_y", record.targetY)
+                    if (record.serverTick == null) putNull("server_tick") else put("server_tick", record.serverTick)
+                    if (record.execTick == null) putNull("exec_tick") else put("exec_tick", record.execTick)
+                    if (record.semanticTick == null) putNull("semantic_tick") else put("semantic_tick", record.semanticTick)
+                    if (record.semanticMs == null) putNull("semantic_ms") else put("semantic_ms", record.semanticMs)
+                    if (record.commandSequence == null) putNull("command_sequence") else put("command_sequence", record.commandSequence)
+                    put("source", record.source.wire)
+                    put("created_at", record.createdAt)
+                }
+                val id = database.insertWithOnConflict(
+                    "card_plays",
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_IGNORE,
+                )
+                if (id != -1L) inserted++
+            }
+            database.setTransactionSuccessful()
+        } finally {
+            database.endTransaction()
+        }
+        return inserted
+    }
+
+    /** Semantic plays in deterministic game-time order. */
+    fun cardPlays(battleUid: String): List<CardPlayRecord> {
+        val sql = """
+            SELECT * FROM card_plays
+            WHERE battle_uid = ?
+            ORDER BY COALESCE(server_tick, 2147483647),
+                     COALESCE(exec_tick, 2147483647), id
+        """.trimIndent()
+        return db.readableDatabase.rawQuery(sql, arrayOf(battleUid)).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        CardPlayRecord(
+                            battleUid = cursor.getString(cursor.getColumnIndexOrThrow("battle_uid")),
+                            eventKey = cursor.getString(cursor.getColumnIndexOrThrow("event_key")),
+                            issuerAccountId = cursor.getLong(cursor.getColumnIndexOrThrow("issuer_account_id")),
+                            owner = cursor.getIntOrNull("owner"),
+                            isSelf = cursor.getIntOrNull("is_self")?.let { it != 0 },
+                            cardId = cursor.getIntOrNull("card_id"),
+                            targetX = cursor.getIntOrNull("target_x"),
+                            targetY = cursor.getIntOrNull("target_y"),
+                            serverTick = cursor.getIntOrNull("server_tick"),
+                            execTick = cursor.getIntOrNull("exec_tick"),
+                            semanticTick = cursor.getIntOrNull("semantic_tick"),
+                            semanticMs = cursor.getLongOrNull("semantic_ms"),
+                            commandSequence = cursor.getLongOrNull("command_sequence"),
+                            source = CardPlaySource.fromWire(cursor.getStringOrNull("source")),
+                            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                        ),
+                    )
+                }
+            }
         }
     }
 

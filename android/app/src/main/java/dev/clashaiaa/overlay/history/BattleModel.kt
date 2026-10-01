@@ -53,6 +53,35 @@ enum class CardSide(val wire: String) {
     }
 }
 
+/** The producer that supplied a semantic card-play row. */
+enum class CardPlaySource(val wire: String) {
+    SEMANTIC_GHOST("semantic_ghost");
+
+    companion object {
+        fun fromWire(value: String?): CardPlaySource =
+            entries.firstOrNull { it.wire == value } ?: SEMANTIC_GHOST
+    }
+}
+
+/** One decoded play command attached to a stable battle uid. */
+data class CardPlayRecord(
+    val battleUid: String,
+    val eventKey: String,
+    val issuerAccountId: Long,
+    val owner: Int? = null,
+    val isSelf: Boolean? = null,
+    val cardId: Int? = null,
+    val targetX: Int? = null,
+    val targetY: Int? = null,
+    val serverTick: Int? = null,
+    val execTick: Int? = null,
+    val semanticTick: Int? = null,
+    val semanticMs: Long? = null,
+    val commandSequence: Long? = null,
+    val source: CardPlaySource = CardPlaySource.SEMANTIC_GHOST,
+    val createdAt: Long,
+)
+
 /**
  * One deck slot of one side.
  *
