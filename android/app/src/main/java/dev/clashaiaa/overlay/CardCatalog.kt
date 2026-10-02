@@ -3,8 +3,11 @@ package dev.clashaiaa.overlay
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import org.json.JSONObject
 import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class CardInfo(
     val cardId: Int,
@@ -31,15 +34,19 @@ class CardCatalog(private val context: Context) {
         bitmaps[cardId]?.let { return it }
         val decoded = runCatching {
             context.assets.open("$cardId.png").use(BitmapFactory::decodeStream)
-        }.getOrNull() ?: return null
+        }.getOrNull()
+        if (decoded == null) {
+            logMissingArtOnce(cardId)
+            return null
+        }
         bitmaps[cardId] = decoded
         return decoded
     }
 
     private fun loadTable(): Map<Int, CardInfo> = runCatching {
         val raw = context.assets.open("cards.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
-        val rows = JSONObject(raw).optJSONObject("by_id") ?: return@runCatching emptyMap()
-        buildMap {
+        val rows = JSONObject(raw).optJSONObject("by_id") ?: JSONObject()
+        val table = buildMap {
             val keys = rows.keys()
             while (keys.hasNext()) {
                 val key = keys.next()
@@ -52,5 +59,41 @@ class CardCatalog(private val context: Context) {
                 put(id, CardInfo(id, name, rawCost.takeIf { it in 0..15 }))
             }
         }
-    }.getOrDefault(emptyMap())
+        if (table.isEmpty()) {
+            logMissingTableOnce()
+        } else {
+            logLoadedTableOnce(table.size)
+        }
+        table
+    }.getOrElse {
+        logMissingTableOnce()
+        emptyMap()
+    }
+
+    private fun logMissingArtOnce(cardId: Int) {
+        if (missingArtReported.add(cardId)) {
+            Log.w(TAG, "[CardCatalog] missing art card_id=$cardId")
+        }
+    }
+
+    companion object {
+        private const val TAG = "ClashTrackerCard"
+
+        /** Diagnostics only: reported at most once per process so frames stay quiet. */
+        private val loadedTableReported = AtomicBoolean(false)
+        private val missingTableReported = AtomicBoolean(false)
+        private val missingArtReported: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+
+        private fun logLoadedTableOnce(size: Int) {
+            if (loadedTableReported.compareAndSet(false, true)) {
+                Log.i(TAG, "[CardCatalog] loaded cards=$size")
+            }
+        }
+
+        private fun logMissingTableOnce() {
+            if (missingTableReported.compareAndSet(false, true)) {
+                Log.w(TAG, "[CardCatalog] cards.json missing or empty")
+            }
+        }
+    }
 }

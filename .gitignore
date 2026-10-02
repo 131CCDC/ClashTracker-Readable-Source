@@ -49,6 +49,8 @@ logs/
 *.codex-ds-task.txt
 
 # Captured game/user data and assets with unclear redistribution status
+assets/cards/cards.json
+assets/cards/cards_api.json
 assets/cards/*.png
 assets/cards/faces/
 probe/artifacts/
