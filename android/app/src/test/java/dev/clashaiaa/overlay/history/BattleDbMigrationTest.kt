@@ -10,7 +10,7 @@ class BattleDbMigrationTest {
     @Test
     fun `v1 to v2 migration is append-only and creates card play schema`() {
         val sql = BattleDb.MIGRATION_1_TO_2.joinToString("\n").uppercase()
-        assertEquals(2, BattleDb.SCHEMA_VERSION)
+        assertEquals(3, BattleDb.SCHEMA_VERSION)
         assertFalse(sql.contains("DROP "))
         assertTrue(sql.contains("ALTER TABLE BATTLES ADD COLUMN WINNER_OWNER INTEGER"))
         assertTrue(sql.contains("ALTER TABLE BATTLES ADD COLUMN NATIVE_RESULT_RAW INTEGER"))
@@ -22,5 +22,16 @@ class BattleDbMigrationTest {
         assertTrue(sql.contains("IDX_CARD_PLAYS_CARD_ID"))
         assertTrue(sql.contains("IDX_CARD_PLAYS_SERVER_TICK"))
         assertTrue(sql.contains("IDX_CARD_PLAYS_OWNER"))
+    }
+
+    @Test
+    fun `v2 to v3 migration is append-only and adds canonical fields`() {
+        val sql = BattleDb.MIGRATION_2_TO_3.joinToString("\n").uppercase()
+        assertFalse(sql.contains("DROP "))
+        assertTrue(sql.contains("CANONICAL_BATTLE_ID"))
+        assertTrue(sql.contains("BATTLE_FINGERPRINT"))
+        assertTrue(sql.contains("PERSONAL_RECORD_ELIGIBLE"))
+        assertTrue(sql.contains("MERGED_SOURCES_JSON"))
+        assertTrue(sql.contains("IDX_BATTLES_FINGERPRINT"))
     }
 }

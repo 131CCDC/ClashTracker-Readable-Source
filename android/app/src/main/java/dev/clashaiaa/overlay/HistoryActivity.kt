@@ -27,6 +27,7 @@ import dev.clashaiaa.overlay.history.BattleSource
 import dev.clashaiaa.overlay.history.BattleWorkingSessions
 import dev.clashaiaa.overlay.history.BattleStats
 import dev.clashaiaa.overlay.history.BattleStatsCalculator
+import dev.clashaiaa.overlay.history.BattleStatus
 import dev.clashaiaa.overlay.history.ExportStore
 import dev.clashaiaa.overlay.history.MatchupRow
 import dev.clashaiaa.overlay.history.asClock
@@ -71,6 +72,7 @@ class HistoryActivity : Activity() {
     private val timeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
     private var records: List<BattleRecord> = emptyList()
+    private var excludedInvalidIdentity: Int = 0
     private var section = Section.SUMMARY
     private var sort = Sort.GAMES
     private var range = Range.ALL
@@ -194,16 +196,21 @@ class HistoryActivity : Activity() {
     }
 
     private fun reload() {
-        BattleHistory.run(this) { dao -> dao.finalized() }.let { future ->
+        BattleHistory.run(this) { dao ->
+            val self = SettingsStore.loadCanonicalSelfAccountId(this)
+            val personal = dao.personal(self)
+            personal to dao.all().count { !it.personalRecordEligible && it.status == BattleStatus.COMPLETE }
+        }.let { future ->
             Thread {
-                val loaded = runCatching { future.get() }.getOrDefault(emptyList())
-                handler.post { onLoaded(loaded) }
+                val loaded = runCatching { future.get() }.getOrDefault(emptyList<BattleRecord>() to 0)
+                handler.post { onLoaded(loaded.first, loaded.second) }
             }.apply { isDaemon = true }.start()
         }
     }
 
-    private fun onLoaded(loaded: List<BattleRecord>) {
+    private fun onLoaded(loaded: List<BattleRecord>, excluded: Int) {
         records = loaded
+        excludedInvalidIdentity = excluded
         render()
     }
 
@@ -223,7 +230,7 @@ class HistoryActivity : Activity() {
     private fun render() {
         content.removeAllViews()
         val slice = filtered()
-        val stats = BattleStatsCalculator.compute(slice)
+        val stats = BattleStatsCalculator.compute(slice, excludedInvalidIdentity)
         statusText?.text = buildString {
             append("数据库 ${records.size} 条 · 当前视图 ${slice.size} 条 · 库文件 ")
             append(BattleHistory.databasePath(this@HistoryActivity))
@@ -276,6 +283,10 @@ class HistoryActivity : Activity() {
         content.addView(kv("平", stats.draws.toString()))
         if (stats.incomplete > 0) {
             content.addView(kv("未完成/待补全", stats.incomplete.toString()))
+        }
+        if (stats.unknown > 0) content.addView(kv("结果未知", stats.unknown.toString()))
+        if (stats.excludedInvalidIdentity > 0) {
+            content.addView(kv("身份无效已排除", stats.excludedInvalidIdentity.toString()))
         }
         content.addView(kv("胜率", stats.winRate.asPercent()))
         content.addView(kv("平均时长", stats.averageDurationSeconds.asClock()))

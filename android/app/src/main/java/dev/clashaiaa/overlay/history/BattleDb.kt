@@ -78,7 +78,7 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
 
     companion object {
         const val NAME = "clashtracker_history.db"
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
 
         private const val CREATE_BATTLES = """
             CREATE TABLE battles (
@@ -121,6 +121,14 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
                 winner_owner INTEGER,
                 native_result_raw INTEGER,
                 native_result_validated INTEGER NOT NULL DEFAULT 0,
+                canonical_battle_id TEXT,
+                provisional_battle_id TEXT,
+                battle_fingerprint TEXT,
+                identity_confidence TEXT,
+                result_source TEXT,
+                result_confidence TEXT,
+                personal_record_eligible INTEGER NOT NULL DEFAULT 0,
+                merged_sources_json TEXT,
                 raw_json TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -179,6 +187,9 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             "CREATE INDEX idx_battles_result ON battles(result)",
             "CREATE INDEX idx_battles_archetype ON battles(enemy_archetype)",
             "CREATE INDEX idx_battles_source ON battles(source)",
+            "CREATE INDEX idx_battles_canonical ON battles(canonical_battle_id)",
+            "CREATE INDEX idx_battles_fingerprint ON battles(battle_fingerprint)",
+            "CREATE INDEX idx_battles_eligible ON battles(personal_record_eligible)",
             "CREATE INDEX idx_cards_uid ON battle_cards(battle_uid)",
             "CREATE INDEX idx_cards_card ON battle_cards(card_id)",
             "CREATE INDEX idx_card_plays_battle_uid ON card_plays(battle_uid)",
@@ -204,9 +215,26 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             "CREATE INDEX idx_card_plays_owner ON card_plays(owner)",
         )
 
+        internal val MIGRATION_2_TO_3 = listOf(
+            "ALTER TABLE battles ADD COLUMN canonical_battle_id TEXT",
+            "ALTER TABLE battles ADD COLUMN provisional_battle_id TEXT",
+            "ALTER TABLE battles ADD COLUMN battle_fingerprint TEXT",
+            "ALTER TABLE battles ADD COLUMN identity_confidence TEXT",
+            "ALTER TABLE battles ADD COLUMN result_source TEXT",
+            "ALTER TABLE battles ADD COLUMN result_confidence TEXT",
+            "ALTER TABLE battles ADD COLUMN personal_record_eligible INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE battles ADD COLUMN merged_sources_json TEXT",
+            "CREATE INDEX idx_battles_canonical ON battles(canonical_battle_id)",
+            "CREATE INDEX idx_battles_fingerprint ON battles(battle_fingerprint)",
+            "CREATE INDEX idx_battles_eligible ON battles(personal_record_eligible)",
+        )
+
         private val MIGRATIONS: Map<Int, (SQLiteDatabase) -> Unit> = mapOf(
             1 to { database ->
                 for (statement in MIGRATION_1_TO_2) database.execSQL(statement)
+            },
+            2 to { database ->
+                for (statement in MIGRATION_2_TO_3) database.execSQL(statement)
             },
         )
     }
@@ -226,14 +254,32 @@ class BattleDao(private val db: BattleDb) {
      *
      * @return true when a row was created, false when an existing row was updated.
      */
-    fun upsert(record: BattleRecord): Boolean {
+    fun upsert(record: BattleRecord, canonicalSelfId: Long = 0L): Boolean {
+        val candidate = BattleCanonicalizer.normalizeBattleSides(record, canonicalSelfId)
+        val rows = all()
+        val sameUid = rows.firstOrNull { it.battleUid == candidate.battleUid }
+        val stable = candidate.canonicalBattleId?.takeIf { it.startsWith("nulls:") || it.startsWith("nulls-replay:") }
+        val crossUid = rows.firstOrNull { it.battleUid != candidate.battleUid && (
+            (stable != null && it.canonicalBattleId == stable) ||
+                BattleCanonicalizer.sameBattle(it, candidate)
+        ) }
+        val match = crossUid ?: sameUid
         val database = db.writableDatabase
         database.beginTransaction()
         try {
-            val existing = loadRow(database, record.battleUid)
-            val merged = if (existing == null) record else mergeBattleRecords(existing.record, record)
-            val values = toValues(merged, existing?.createdAt)
-            if (existing == null) {
+            val candidateStored = loadRow(database, candidate.battleUid)
+            val keeper = match?.let { loadRow(database, it.battleUid) }
+            val incoming = if (candidateStored == null) candidate else {
+                BattleCanonicalizer.mergeCanonical(candidateStored.record, candidate)
+            }
+            val merged = when {
+                keeper != null -> BattleCanonicalizer.mergeCanonical(keeper.record, incoming)
+                candidateStored != null -> incoming
+                else -> candidate
+            }
+            val createdAt = keeper?.createdAt ?: candidateStored?.createdAt
+            val values = toValues(merged, createdAt)
+            if (keeper == null && candidateStored == null) {
                 database.insertOrThrow("battles", null, values)
             } else {
                 database.update("battles", values, "battle_uid = ?", arrayOf(merged.battleUid))
@@ -241,8 +287,12 @@ class BattleDao(private val db: BattleDb) {
             if (merged.myDeck.isNotEmpty() || merged.enemyDeck.isNotEmpty()) {
                 writeCards(database, merged)
             }
+            if (keeper != null && candidateStored != null && keeper.record.battleUid != candidateStored.record.battleUid) {
+                migrateCardPlays(database, candidateStored.record.battleUid, keeper.record.battleUid)
+                database.delete("battles", "battle_uid = ?", arrayOf(candidateStored.record.battleUid))
+            }
             database.setTransactionSuccessful()
-            return existing == null
+            return keeper == null && candidateStored == null
         } finally {
             database.endTransaction()
         }
@@ -335,6 +385,25 @@ class BattleDao(private val db: BattleDb) {
             BattleSource.NATIVE_RESULT.wire,
         ),
     ).filter(BattleHistoryReconciler::isFinalized)
+
+    fun personal(canonicalSelfId: Long): List<BattleRecord> {
+        ensureConsolidated(canonicalSelfId)
+        return finalized().filter { it.personalRecordEligible }
+    }
+
+    fun ensureConsolidated(canonicalSelfId: Long): ConsolidationReport {
+        val marker = "canonical_v3_${canonicalSelfId.coerceAtLeast(0)}"
+        if (db.meta(marker) == "done") {
+            val rows = all()
+            return BattleCanonicalizer.consolidate(rows, canonicalSelfId)
+        }
+        val snapshot = all().sortedBy { it.battleTime }
+        for (record in snapshot) upsert(record, canonicalSelfId)
+        // A second pass merges normalized rows whose first pass changed fingerprints.
+        for (record in all().sortedBy { it.battleTime }) upsert(record, canonicalSelfId)
+        db.putMeta(marker, "done")
+        return BattleCanonicalizer.consolidate(all(), canonicalSelfId)
+    }
 
     fun recent(limit: Int): List<BattleRecord> =
         read("SELECT * FROM battles ORDER BY battle_time DESC LIMIT ?", arrayOf(limit.toString()))
@@ -481,6 +550,14 @@ class BattleDao(private val db: BattleDb) {
             put("winner_owner", record.winnerOwner)
             put("native_result_raw", record.nativeResultRaw)
             put("native_result_validated", if (record.nativeResultValidated) 1 else 0)
+            put("canonical_battle_id", record.canonicalBattleId)
+            put("provisional_battle_id", record.provisionalBattleId)
+            put("battle_fingerprint", record.battleFingerprint)
+            put("identity_confidence", record.identityConfidence)
+            put("result_source", record.resultSource)
+            put("result_confidence", record.resultConfidence)
+            put("personal_record_eligible", if (record.personalRecordEligible) 1 else 0)
+            put("merged_sources_json", JSONArray(record.mergedSources).toString())
             put("raw_json", record.rawJson)
             put("created_at", createdAt ?: now)
             put("updated_at", now)
@@ -543,8 +620,32 @@ class BattleDao(private val db: BattleDb) {
         winnerOwner = cursor.getIntOrNull("winner_owner"),
         nativeResultRaw = cursor.getIntOrNull("native_result_raw"),
         nativeResultValidated = cursor.getInt(cursor.getColumnIndexOrThrow("native_result_validated")) != 0,
+        canonicalBattleId = cursor.getStringOrNull("canonical_battle_id"),
+        provisionalBattleId = cursor.getStringOrNull("provisional_battle_id"),
+        battleFingerprint = cursor.getStringOrNull("battle_fingerprint"),
+        identityConfidence = cursor.getStringOrNull("identity_confidence"),
+        resultSource = cursor.getStringOrNull("result_source"),
+        resultConfidence = cursor.getStringOrNull("result_confidence"),
+        personalRecordEligible = cursor.getInt(cursor.getColumnIndexOrThrow("personal_record_eligible")) != 0,
+        mergedSources = cursor.getStringOrNull("merged_sources_json")?.let { raw ->
+            runCatching { JSONArray(raw) }.getOrNull()?.let { array ->
+                (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+            }
+        }.orEmpty(),
         rawJson = cursor.getStringOrNull("raw_json"),
     )
+
+    private fun migrateCardPlays(database: SQLiteDatabase, fromUid: String, toUid: String) {
+        database.execSQL(
+            """INSERT OR IGNORE INTO card_plays(
+                battle_uid,event_key,issuer_account_id,owner,is_self,card_id,target_x,target_y,
+                server_tick,exec_tick,semantic_tick,semantic_ms,command_sequence,source,created_at
+            ) SELECT ?,event_key,issuer_account_id,owner,is_self,card_id,target_x,target_y,
+                server_tick,exec_tick,semantic_tick,semantic_ms,command_sequence,source,created_at
+              FROM card_plays WHERE battle_uid = ?""".trimIndent(),
+            arrayOf(toUid, fromUid),
+        )
+    }
 }
 
 internal fun Cursor.getStringOrNull(column: String): String? {

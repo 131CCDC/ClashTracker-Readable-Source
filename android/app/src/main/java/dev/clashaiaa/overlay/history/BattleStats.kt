@@ -99,6 +99,8 @@ data class BattleStats(
     val cards: List<CardRow>,
     val lossAnalysis: LossAnalysis,
     val longest: List<BattleRecord>,
+    val unknown: Int = 0,
+    val excludedInvalidIdentity: Int = 0,
 ) {
     companion object {
         val EMPTY = BattleStats(
@@ -131,13 +133,14 @@ object BattleStatsCalculator {
     /** Below this many decided games a row is shown but not ranked. */
     const val MIN_SAMPLE_FOR_RANKING = 5
 
-    fun compute(records: List<BattleRecord>): BattleStats {
+    fun compute(records: List<BattleRecord>, excludedInvalidIdentity: Int = 0): BattleStats {
         if (records.isEmpty()) return BattleStats.EMPTY
 
         var wins = 0
         var losses = 0
         var draws = 0
         var incomplete = 0
+        var unknown = 0
         val durations = ArrayList<Double>(records.size)
         var crownSum = 0
         var crownCount = 0
@@ -154,7 +157,8 @@ object BattleStatsCalculator {
                 BattleResult.WIN -> wins++
                 BattleResult.LOSS -> losses++
                 BattleResult.DRAW -> draws++
-                BattleResult.INCOMPLETE, BattleResult.UNKNOWN -> incomplete++
+                BattleResult.INCOMPLETE -> incomplete++
+                BattleResult.UNKNOWN -> unknown++
             }
             val decided = record.decided
             record.durationSeconds?.let { durations += it }
@@ -253,6 +257,8 @@ object BattleStatsCalculator {
                 .filter { it.durationSeconds != null }
                 .sortedByDescending { it.durationSeconds }
                 .take(10),
+            unknown = unknown,
+            excludedInvalidIdentity = excludedInvalidIdentity,
         )
     }
 

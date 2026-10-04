@@ -84,6 +84,7 @@ object NullsHistoryImporter {
         namer: CardNamer? = null,
         fallbackTimeMs: Long = System.currentTimeMillis(),
         pending: List<BattleRecord> = emptyList(),
+        canonicalSelfId: Long = 0L,
     ): SyncReport {
         var imported = 0
         var duplicates = 0
@@ -99,8 +100,9 @@ object NullsHistoryImporter {
                 diagnostics += outcome.rejection ?: "rejected"
                 continue
             }
-            val existing = dao.byUid(record.battleUid)
-            dao.upsert(record)
+            val normalized = BattleCanonicalizer.normalizeBattleSides(record, canonicalSelfId)
+            val existing = dao.all().firstOrNull { BattleCanonicalizer.sameBattle(it, normalized) }
+            dao.upsert(normalized, canonicalSelfId)
             if (existing == null) {
                 imported++
             } else {

@@ -129,6 +129,12 @@ object SettingsStore {
             .getLong(KEY_LEARNED_ACCOUNT, 0L)
             .coerceAtLeast(0L)
 
+    /** Stable identity used by history normalization; a seat guess is never returned. */
+    fun loadCanonicalSelfAccountId(context: Context): Long {
+        val configured = load(context).localAccountId
+        return configured.takeIf { it > 0L } ?: loadLearnedAccountId(context)
+    }
+
     fun saveLearnedAccountId(context: Context, accountId: Long) {
         if (accountId <= 0L) return
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()

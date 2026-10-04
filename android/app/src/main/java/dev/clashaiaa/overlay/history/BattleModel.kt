@@ -167,6 +167,14 @@ data class BattleRecord(
     /** Whether the game marked the native result as validated. */
     val nativeResultValidated: Boolean = false,
     val rawJson: String? = null,
+    val canonicalBattleId: String? = null,
+    val provisionalBattleId: String? = null,
+    val battleFingerprint: String? = null,
+    val identityConfidence: String? = null,
+    val resultSource: String? = null,
+    val resultConfidence: String? = null,
+    val personalRecordEligible: Boolean = false,
+    val mergedSources: List<String> = emptyList(),
 ) {
     val decided: Boolean
         get() = result == BattleResult.WIN || result == BattleResult.LOSS || result == BattleResult.DRAW
@@ -228,4 +236,12 @@ internal fun mergeBattleRecords(old: BattleRecord, new: BattleRecord): BattleRec
     nativeResultRaw = new.nativeResultRaw ?: old.nativeResultRaw,
     nativeResultValidated = new.nativeResultValidated || old.nativeResultValidated,
     rawJson = new.rawJson ?: old.rawJson,
+    canonicalBattleId = new.canonicalBattleId ?: old.canonicalBattleId,
+    provisionalBattleId = new.provisionalBattleId ?: old.provisionalBattleId,
+    battleFingerprint = new.battleFingerprint ?: old.battleFingerprint,
+    identityConfidence = new.identityConfidence ?: old.identityConfidence,
+    resultSource = new.resultSource ?: old.resultSource,
+    resultConfidence = new.resultConfidence ?: old.resultConfidence,
+    personalRecordEligible = new.personalRecordEligible || old.personalRecordEligible,
+    mergedSources = (old.mergedSources + new.mergedSources + old.source.wire + new.source.wire).distinct(),
 )

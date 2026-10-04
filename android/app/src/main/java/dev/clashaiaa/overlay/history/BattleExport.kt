@@ -65,6 +65,14 @@ object BattleExport {
         add("enemy_player_id")
         add("identity_source")
         add("full_battle")
+        add("canonical_battle_id")
+        add("provisional_battle_id")
+        add("battle_fingerprint")
+        add("identity_confidence")
+        add("result_source")
+        add("result_confidence")
+        add("personal_record_eligible")
+        add("merged_sources")
         for (slot in 1..8) add("my_card_${slot}_zh")
         for (slot in 1..8) add("enemy_card_${slot}_zh")
     }
@@ -106,6 +114,14 @@ object BattleExport {
             row += record.enemyPlayerId ?: ""
             row += record.identitySource ?: ""
             row += if (record.fullBattle) "1" else "0"
+            row += record.canonicalBattleId ?: ""
+            row += record.provisionalBattleId ?: ""
+            row += record.battleFingerprint ?: ""
+            row += record.identityConfidence ?: ""
+            row += record.resultSource ?: ""
+            row += record.resultConfidence ?: ""
+            row += if (record.personalRecordEligible) "1" else "0"
+            row += record.mergedSources.joinToString("|")
             for (slot in 0 until 8) row += record.cardLabel(CardSide.SELF, slot, zh = true)
             for (slot in 0 until 8) row += record.cardLabel(CardSide.ENEMY, slot, zh = true)
             builder.append(row.joinToString(",") { escape(it) })
@@ -165,6 +181,14 @@ object BattleExport {
         put("first_tick", record.firstTick)
         put("last_tick", record.lastTick)
         put("full_battle", record.fullBattle)
+        put("canonical_battle_id", record.canonicalBattleId)
+        put("provisional_battle_id", record.provisionalBattleId)
+        put("battle_fingerprint", record.battleFingerprint)
+        put("identity_confidence", record.identityConfidence)
+        put("result_source", record.resultSource)
+        put("result_confidence", record.resultConfidence)
+        put("personal_record_eligible", record.personalRecordEligible)
+        put("merged_sources", JSONArray(record.mergedSources))
         record.rawJson?.let { raw ->
             put("raw_probe_frame", runCatching { JSONObject(raw) }.getOrNull())
         }

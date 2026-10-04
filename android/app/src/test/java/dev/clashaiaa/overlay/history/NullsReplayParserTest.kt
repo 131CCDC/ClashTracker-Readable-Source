@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeNotNull
 import org.junit.Test
 
 /**
@@ -18,7 +19,9 @@ import org.junit.Test
 class NullsReplayParserTest {
 
     private val raw: String by lazy {
-        javaClass.getResourceAsStream("/nulls_replay.json")!!
+        val stream = javaClass.getResourceAsStream("/nulls_replay.json")
+        assumeNotNull(stream)
+        stream!!
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
     }

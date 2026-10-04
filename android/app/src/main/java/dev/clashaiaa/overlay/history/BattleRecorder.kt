@@ -62,6 +62,7 @@ class BattleRecorder(
     )
 
     private var live: Live? = null
+    private var finalizedFrameKey: String? = null
 
     /** The battle currently being recorded, if any. */
     val active: Boolean get() = live != null
@@ -97,6 +98,9 @@ class BattleRecorder(
 
         val current = live
         if (current == null) {
+            val key = finalFrameKey(frame)
+            if (key != null && key == finalizedFrameKey) return events
+            if (!frame.finalized || frame.tick <= FULL_BATTLE_MAX_FIRST_TICK) finalizedFrameKey = null
             val started = start(frame, localOwner, identitySource, identityVerified, now)
             events += Event.Started(toRecord(started, Kind.STARTED))
             maybeFinalize(started, frame)?.let(events::add)
@@ -133,6 +137,7 @@ class BattleRecorder(
     /** Drop the in-memory session without writing; used when the user clears state. */
     fun reset() {
         live = null
+        finalizedFrameKey = null
     }
 
     private fun start(
@@ -230,6 +235,7 @@ class BattleRecorder(
         val winner = frame.resultRaw?.takeIf { it in 0..1 } ?: return null
         session.finalizedEmitted = true
         session.winnerOwner = winner
+        finalizedFrameKey = finalFrameKey(frame)
         return Event.Finalized(toRecord(session, Kind.FINALIZED))
     }
 
@@ -249,6 +255,15 @@ class BattleRecorder(
 
     private fun crownsFor(frame: BattleFrame, owner: Int): Int =
         if (owner in frame.crowns.indices) frame.crowns[owner] else 0
+
+    private fun finalFrameKey(frame: BattleFrame): String? {
+        if (!frame.finalized || !frame.resultValidated || frame.resultRaw !in 0..1) return null
+        val accounts = frame.players.sortedBy { it.owner }.joinToString(",") { "${it.owner}:${it.accountId}" }
+        val decks = frame.players.sortedBy { it.owner }.joinToString("|") { player ->
+            player.deck.map { it.cardId }.filter { it > 0 }.sorted().joinToString(",")
+        }
+        return "$accounts|$decks|${frame.crowns.joinToString(",")}|${frame.tick}|${frame.resultRaw}"
+    }
 
     private fun toRecord(session: Live, kind: Kind): BattleRecord {
         val myOwner = session.myOwner

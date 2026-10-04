@@ -43,7 +43,11 @@ object BattleHistory {
     /** Run [block] on the history thread. */
     fun <T> run(context: Context, block: (BattleDao) -> T): java.util.concurrent.Future<T> {
         val target = dao(context)
-        return executor.submit<T> { block(target) }
+        val self = dev.clashaiaa.overlay.SettingsStore.loadCanonicalSelfAccountId(context)
+        return executor.submit<T> {
+            target.ensureConsolidated(self)
+            block(target)
+        }
     }
 
     /** Persist a crash-safe start row or an authoritative finalized row. */
@@ -56,8 +60,12 @@ object BattleHistory {
             return false
         }
         val target = dao(context)
+        val self = dev.clashaiaa.overlay.SettingsStore.loadCanonicalSelfAccountId(context)
         executor.execute {
-            runCatching { target.upsert(record) }
+            runCatching {
+                target.ensureConsolidated(self)
+                target.upsert(record, self)
+            }
                 .onSuccess { notifyChanged() }
                 .onFailure { Log.w(TAG, "[History] save failed uid=${record.battleUid}", it) }
         }

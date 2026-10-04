@@ -42,7 +42,7 @@ object BattleHistorySync {
         val files = payloadFiles(context)
         if (files.isEmpty()) return PayloadSyncSummary(0, 0, 0, 0, 0, 0, emptySet(), emptyList())
 
-        val localAccountId = SettingsStore.loadLearnedAccountId(context)
+        val localAccountId = SettingsStore.loadCanonicalSelfAccountId(context)
         val namer = CardNames(context)
         return BattleHistory.run(context) { dao ->
             var found = 0
@@ -66,6 +66,7 @@ object BattleHistorySync {
                     namer = namer,
                     fallbackTimeMs = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis(),
                     pending = pending,
+                    canonicalSelfId = localAccountId,
                 )
                 found += report.found
                 imported += report.imported
