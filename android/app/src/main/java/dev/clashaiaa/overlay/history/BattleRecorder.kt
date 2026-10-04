@@ -316,6 +316,8 @@ class BattleRecorder(
             winnerOwner = session.winnerOwner,
             nativeResultRaw = session.nativeResultRaw,
             nativeResultValidated = session.nativeResultValidated,
+            needsHistoryReconciliation = !nativeComplete,
+            reconciliationState = if (nativeComplete) "matched" else "pending",
         )
     }
 

@@ -45,6 +45,9 @@ object BattleHistorySync {
         val localAccountId = SettingsStore.loadCanonicalSelfAccountId(context)
         val namer = CardNames(context)
         return BattleHistory.run(context) { dao ->
+            val persistedPending = dao.pendingReconciliation()
+            val allPending = (pending + persistedPending).distinctBy { it.battleUid }
+            dao.markReconciliationAttempt(persistedPending.map { it.battleUid })
             var found = 0
             var imported = 0
             var duplicates = 0
@@ -65,7 +68,7 @@ object BattleHistorySync {
                     source = file.name,
                     namer = namer,
                     fallbackTimeMs = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis(),
-                    pending = pending,
+                    pending = allPending,
                     canonicalSelfId = localAccountId,
                 )
                 found += report.found

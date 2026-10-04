@@ -78,7 +78,7 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
 
     companion object {
         const val NAME = "clashtracker_history.db"
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
 
         private const val CREATE_BATTLES = """
             CREATE TABLE battles (
@@ -129,6 +129,10 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
                 result_confidence TEXT,
                 personal_record_eligible INTEGER NOT NULL DEFAULT 0,
                 merged_sources_json TEXT,
+                needs_history_reconciliation INTEGER NOT NULL DEFAULT 0,
+                reconciliation_state TEXT NOT NULL DEFAULT 'none',
+                reconciliation_attempts INTEGER NOT NULL DEFAULT 0,
+                reconciliation_attempted_at INTEGER,
                 raw_json TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -190,6 +194,7 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             "CREATE INDEX idx_battles_canonical ON battles(canonical_battle_id)",
             "CREATE INDEX idx_battles_fingerprint ON battles(battle_fingerprint)",
             "CREATE INDEX idx_battles_eligible ON battles(personal_record_eligible)",
+            "CREATE INDEX idx_battles_reconciliation ON battles(needs_history_reconciliation, battle_time)",
             "CREATE INDEX idx_cards_uid ON battle_cards(battle_uid)",
             "CREATE INDEX idx_cards_card ON battle_cards(card_id)",
             "CREATE INDEX idx_card_plays_battle_uid ON card_plays(battle_uid)",
@@ -229,12 +234,24 @@ class BattleDb(context: Context) : SQLiteOpenHelper(context, NAME, null, SCHEMA_
             "CREATE INDEX idx_battles_eligible ON battles(personal_record_eligible)",
         )
 
+        internal val MIGRATION_3_TO_4 = listOf(
+            "ALTER TABLE battles ADD COLUMN needs_history_reconciliation INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE battles ADD COLUMN reconciliation_state TEXT NOT NULL DEFAULT 'none'",
+            "ALTER TABLE battles ADD COLUMN reconciliation_attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE battles ADD COLUMN reconciliation_attempted_at INTEGER",
+            "CREATE INDEX idx_battles_reconciliation ON battles(needs_history_reconciliation, battle_time)",
+            "UPDATE battles SET needs_history_reconciliation = 1, reconciliation_state = 'pending' WHERE status = 'incomplete'",
+        )
+
         private val MIGRATIONS: Map<Int, (SQLiteDatabase) -> Unit> = mapOf(
             1 to { database ->
                 for (statement in MIGRATION_1_TO_2) database.execSQL(statement)
             },
             2 to { database ->
                 for (statement in MIGRATION_2_TO_3) database.execSQL(statement)
+            },
+            3 to { database ->
+                for (statement in MIGRATION_3_TO_4) database.execSQL(statement)
             },
         )
     }
@@ -389,6 +406,25 @@ class BattleDao(private val db: BattleDb) {
     fun personal(canonicalSelfId: Long): List<BattleRecord> {
         ensureConsolidated(canonicalSelfId)
         return finalized().filter { it.personalRecordEligible }
+    }
+
+    fun pendingReconciliation(nowMs: Long = System.currentTimeMillis(), windowMs: Long = 72L * 60 * 60 * 1000): List<BattleRecord> =
+        read(
+            "SELECT * FROM battles WHERE status = ? AND needs_history_reconciliation = 1 AND battle_time >= ? ORDER BY battle_time DESC",
+            arrayOf(BattleStatus.INCOMPLETE.wire, (nowMs - windowMs).toString()),
+        )
+
+    fun markReconciliationAttempt(battleUids: Collection<String>, attemptedAt: Long = System.currentTimeMillis()) {
+        if (battleUids.isEmpty()) return
+        val database = db.writableDatabase
+        database.beginTransaction()
+        try {
+            for (uid in battleUids) database.execSQL(
+                "UPDATE battles SET reconciliation_attempts = reconciliation_attempts + 1, reconciliation_attempted_at = ?, reconciliation_state = 'pending' WHERE battle_uid = ? AND status = 'incomplete'",
+                arrayOf(attemptedAt, uid),
+            )
+            database.setTransactionSuccessful()
+        } finally { database.endTransaction() }
     }
 
     fun ensureConsolidated(canonicalSelfId: Long): ConsolidationReport {
@@ -558,6 +594,10 @@ class BattleDao(private val db: BattleDb) {
             put("result_confidence", record.resultConfidence)
             put("personal_record_eligible", if (record.personalRecordEligible) 1 else 0)
             put("merged_sources_json", JSONArray(record.mergedSources).toString())
+            put("needs_history_reconciliation", if (record.needsHistoryReconciliation) 1 else 0)
+            put("reconciliation_state", record.reconciliationState)
+            put("reconciliation_attempts", record.reconciliationAttempts)
+            put("reconciliation_attempted_at", record.reconciliationAttemptedAt)
             put("raw_json", record.rawJson)
             put("created_at", createdAt ?: now)
             put("updated_at", now)
@@ -632,6 +672,10 @@ class BattleDao(private val db: BattleDb) {
                 (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
             }
         }.orEmpty(),
+        needsHistoryReconciliation = cursor.getInt(cursor.getColumnIndexOrThrow("needs_history_reconciliation")) != 0,
+        reconciliationState = cursor.getStringOrNull("reconciliation_state") ?: "none",
+        reconciliationAttempts = cursor.getInt(cursor.getColumnIndexOrThrow("reconciliation_attempts")),
+        reconciliationAttemptedAt = cursor.getLongOrNull("reconciliation_attempted_at"),
         rawJson = cursor.getStringOrNull("raw_json"),
     )
 

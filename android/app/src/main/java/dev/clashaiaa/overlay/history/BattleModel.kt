@@ -175,6 +175,10 @@ data class BattleRecord(
     val resultConfidence: String? = null,
     val personalRecordEligible: Boolean = false,
     val mergedSources: List<String> = emptyList(),
+    val needsHistoryReconciliation: Boolean = false,
+    val reconciliationState: String = "none",
+    val reconciliationAttempts: Int = 0,
+    val reconciliationAttemptedAt: Long? = null,
 ) {
     val decided: Boolean
         get() = result == BattleResult.WIN || result == BattleResult.LOSS || result == BattleResult.DRAW
@@ -244,4 +248,13 @@ internal fun mergeBattleRecords(old: BattleRecord, new: BattleRecord): BattleRec
     resultConfidence = new.resultConfidence ?: old.resultConfidence,
     personalRecordEligible = new.personalRecordEligible || old.personalRecordEligible,
     mergedSources = (old.mergedSources + new.mergedSources + old.source.wire + new.source.wire).distinct(),
+    needsHistoryReconciliation = if (new.status == BattleStatus.COMPLETE) false
+        else new.needsHistoryReconciliation || old.needsHistoryReconciliation,
+    reconciliationState = when {
+        new.status == BattleStatus.COMPLETE -> "matched"
+        new.reconciliationState != "none" -> new.reconciliationState
+        else -> old.reconciliationState
+    },
+    reconciliationAttempts = maxOf(old.reconciliationAttempts, new.reconciliationAttempts),
+    reconciliationAttemptedAt = new.reconciliationAttemptedAt ?: old.reconciliationAttemptedAt,
 )
