@@ -87,9 +87,10 @@ object BattleCanonicalizer {
         val rightEndOnly = endOnly(right)
         if (leftEndOnly || rightEndOnly) {
             // A final frame can survive for minutes and be re-read after process restart.
-            return leftTicks != null && rightTicks != null &&
-                abs(leftTicks - rightTicks) <= MAX_TICK_DELTA &&
-                abs(left.battleTime - right.battleTime) <= END_FRAME_WINDOW_MS
+            if (leftTicks == null || rightTicks == null) return false
+            val wallDelta = abs(left.battleTime - right.battleTime)
+            val tickTolerance = if (wallDelta <= START_WINDOW_MS) MAX_TICK_DELTA else RESTART_TICK_DELTA
+            return abs(leftTicks - rightTicks) <= tickTolerance && wallDelta <= END_FRAME_WINDOW_MS
         }
         val leftStart = left.startTime ?: left.battleTime
         val rightStart = right.startTime ?: right.battleTime
@@ -192,6 +193,7 @@ object BattleCanonicalizer {
 
     private val UNDECIDED = setOf(BattleResult.UNKNOWN, BattleResult.INCOMPLETE)
     private const val MAX_TICK_DELTA = 100
+    private const val RESTART_TICK_DELTA = 2
     private const val START_WINDOW_MS = 20_000L
     private const val END_FRAME_WINDOW_MS = 15 * 60_000L
 }
